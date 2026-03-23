@@ -1,6 +1,6 @@
 {
   "name": "stocksalesapp",
-  "version": "5.1.5",
+  "version": "5.1.7",
   "description": "Stock and Sales Management System with Electron + Node.js/Express backend",
   "main": "main.js",
   "scripts": {
@@ -43,7 +43,8 @@
       "backgroundColor": "#ffffff",
       "capabilities": [
         "internetClient",
-        "privateNetworkClientServer"
+        "privateNetworkClientServer",
+        "runFullTrust" 
       ]
     }
   },
