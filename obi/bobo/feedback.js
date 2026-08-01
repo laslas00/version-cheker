@@ -16,7 +16,16 @@ async function fetchFeedbackWithStats(shouldRender = true) {
         
         if (error) throw error;
         
-        feedbackData = feedback || [];
+        const unique = new Map();
+        (feedback || []).forEach(item => {
+            if (!item) return;
+            const key = item.id != null ? item.id : JSON.stringify(item);
+            unique.set(key, item);
+        });
+        feedbackData = Array.from(unique.values()).map(item => ({
+            ...item,
+            sentiment: normalizeFeedbackSentiment(item.sentiment)
+        }));
         document.getElementById('feedbackCount').textContent = feedbackData.length;
         
         // Only render if explicitly requested
@@ -36,6 +45,17 @@ async function fetchFeedbackWithStats(shouldRender = true) {
 
 
 // Enhanced Feedback Dashboard with Stats
+function normalizeFeedbackSentiment(value) {
+    const sentiment = String(value || '').trim().toLowerCase();
+    if (['happy', 'very happy', 'very-happy', 'satisfied', 'very satisfied', 'very-satisfied', 'very_satisfied'].includes(sentiment)) {
+        return 'Happy';
+    }
+    if (['sad', 'unhappy', 'very sad', 'very-sad', 'dissatisfied', 'very dissatisfied', 'very-dissatisfied', 'not happy'].includes(sentiment)) {
+        return 'Sad';
+    }
+    return 'Neutral';
+}
+
 function renderEnhancedFeedbackDashboard() {
     // Prevent duplicate rendering
     if (window._renderingFeedback) {
@@ -50,6 +70,8 @@ function renderEnhancedFeedbackDashboard() {
         if (!tbody) return;
         
         tbody.innerHTML = '';
+        
+        feedbackData = Array.from(new Map((feedbackData || []).map(item => [item.id != null ? item.id : JSON.stringify(item), item])).values());
         
         // Calculate feedback statistics
         const stats = calculateFeedbackStats(feedbackData);
@@ -196,22 +218,23 @@ function renderEnhancedFeedbackDashboard() {
             
             // Sentiment with emoji
             const sentimentConfig = {
-                'Happy': { emoji: '😊', color: '#10b981', bg: 'rgba(16,185,129,0.1)' },
-                'Neutral': { emoji: '😐', color: '#f59e0b', bg: 'rgba(245,158,11,0.1)' },
-                'Sad': { emoji: '😞', color: '#ef4444', bg: 'rgba(239,68,68,0.1)' }
+                'Happy': { emoji: '😊', color: '#10b981' },
+                'Neutral': { emoji: '😐', color: '#f59e0b' },
+                'Sad': { emoji: '😞', color: '#ef4444' }
             };
-            const config = sentimentConfig[feedback.sentiment] || sentimentConfig['Neutral'];
+            const normalizedSentiment = normalizeFeedbackSentiment(feedback.sentiment);
+            const config = sentimentConfig[normalizedSentiment] || sentimentConfig['Neutral'];
             row.insertCell(1).innerHTML = `
                 <div style="display: flex; align-items: center; gap: 8px;">
                     <span style="font-size: 1.5rem;">${config.emoji}</span>
-                    <span style="color: ${config.color}; font-weight: 500;">${feedback.sentiment}</span>
+                    <span style="color: ${config.color}; font-weight: 500;">${normalizedSentiment}</span>
                 </div>
             `;
             
             // Feedback message
             const message = feedback.suggestions || feedback.feedback_text || '—';
             row.insertCell(2).innerHTML = `
-                <div style="max-width: 300px;">
+                <div style="max-width: 300px; white-space: normal; word-break: break-word; overflow-wrap: anywhere;">
                     <span style="font-size: 0.85rem;">${message.substring(0, 80)}${message.length > 80 ? '...' : ''}</span>
                 </div>
             `;
@@ -220,7 +243,7 @@ function renderEnhancedFeedbackDashboard() {
             row.insertCell(3).innerHTML = `<strong>${feedback.username || 'Anonymous'}</strong>`;
             
             // Device ID (truncated)
-            row.insertCell(4).innerHTML = `<code style="font-size: 0.7rem;">${(feedback.device_id || '—').substring(0, 12)}...</code>`;
+            row.insertCell(4).innerHTML = `<code style="font-size: 0.7rem;">${(feedback.device_id || '—').substring(0, 12)}${feedback.device_id && feedback.device_id.length > 12 ? '...' : ''}</code>`;
             
             // Location
             row.insertCell(5).textContent = `${feedback.city || ''} ${feedback.country || ''}`.trim() || '—';
@@ -232,11 +255,13 @@ function renderEnhancedFeedbackDashboard() {
                 'manual': '✍️ Manual',
                 'sale': '💰 Sale',
                 'stock': '📦 Stock',
-                'customer': '👤 Customer'
+                'customer': '👤 Customer',
+                'general': '📝 General'
             };
+            const feedbackType = typeLabels[feedback.feedback_type] || typeLabels[feedback.feedback_sources] || typeLabels[feedback.feedback_source] || '📝 General';
             row.insertCell(6).innerHTML = `
-                <span class="event-badge" style="background: rgba(59,130,246,0.2); color: #60a5fa;">
-                    ${typeLabels[feedback.feedback_type] || typeLabels[feedback.feedback_source] || '📝 General'}
+                <span class="event-badge" style="background: rgba(59,130,246,0.2); color: #60a5fa; display: inline-flex; align-items: center; gap: 4px;">
+                    ${feedbackType}
                 </span>
             `;
             
@@ -275,10 +300,11 @@ function renderEnhancedFeedbackDashboard() {
 }
 // Calculate feedback statistics
 function calculateFeedbackStats(feedback) {
-    const total = feedback.length;
-    const happy = feedback.filter(f => f.sentiment === 'Happy').length;
-    const neutral = feedback.filter(f => f.sentiment === 'Neutral').length;
-    const sad = feedback.filter(f => f.sentiment === 'Sad').length;
+    const normalized = feedback.map(f => ({ ...f, sentiment: normalizeFeedbackSentiment(f.sentiment) }));
+    const total = normalized.length;
+    const happy = normalized.filter(f => f.sentiment === 'Happy').length;
+    const neutral = normalized.filter(f => f.sentiment === 'Neutral').length;
+    const sad = normalized.filter(f => f.sentiment === 'Sad').length;
     
     const happyPercent = total > 0 ? Math.round((happy / total) * 100) : 0;
     const neutralPercent = total > 0 ? Math.round((neutral / total) * 100) : 0;

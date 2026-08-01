@@ -50,6 +50,150 @@ const formatShortDate = (iso) => {
   return luxon.DateTime.fromISO(iso).toFormat('yyyy-MM-dd');
 };
 
+const safeParseJSON = (value) => {
+  if (!value) return null;
+  if (typeof value === 'object') return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+};
+
+function parseVersion(value) {
+  if (!value || value === 'unknown') return [0, 0, 0];
+  const parts = value.split('.').map(p => Number(p));
+  return [parts[0] || 0, parts[1] || 0, parts[2] || 0];
+}
+
+function compareVersions(a, b) {
+  const pa = parseVersion(a);
+  const pb = parseVersion(b);
+  for (let i = 0; i < 3; i++) {
+    if (pa[i] !== pb[i]) return pb[i] - pa[i];
+  }
+  return 0;
+}
+
+function buildVersionBreakdown(data) {
+  const versionMap = {};
+  data.forEach(s => {
+    const version = s.app_version || 'unknown';
+    if (!versionMap[version]) {
+      versionMap[version] = { count: 0, users: new Set(), devices: new Set() };
+    }
+    versionMap[version].count += 1;
+    if (s.username) versionMap[version].users.add(s.username);
+    if (s.device_id) versionMap[version].devices.add(s.device_id);
+  });
+  return Object.entries(versionMap).map(([version, info]) => ({
+    version,
+    count: info.count,
+    users: Array.from(info.users).slice(0, 6),
+    devices: Array.from(info.devices).slice(0, 6)
+  })).sort((a, b) => compareVersions(a.version, b.version));
+}
+
+function showVersionBreakdown(breakdown) {
+  const panel = document.getElementById('versionListPanel');
+  if (!panel) return;
+  if (!breakdown || breakdown.length === 0) {
+    panel.innerHTML = `
+      <div class="version-list-header">
+        <h3>Version rollout details</h3>
+        <button class="close-version-btn" type="button">×</button>
+      </div>
+      <p>No version data available.</p>
+    `;
+    panel.classList.add('show');
+    panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    panel.querySelector('.close-version-btn')?.addEventListener('click', () => panel.classList.remove('show'));
+    return;
+  }
+
+  panel.innerHTML = `
+    <div class="version-list-header">
+      <div>
+        <h3>Version rollout details</h3>
+        <p style="margin:0; color: var(--text-secondary);">Click any version card for a quick view of users and devices.</p>
+      </div>
+      <button class="close-version-btn" type="button">×</button>
+    </div>
+    <div class="version-list-items">
+      ${breakdown.map(v => `
+        <div class="version-list-item">
+          <div>
+            <strong>${v.version === 'unknown' ? 'unknown' : `v${v.version}`}</strong>
+            <div class="version-list-meta">
+              <span>${v.count} setups</span>
+              <span>${v.users.length} named users</span>
+              <span>${v.devices.length} devices</span>
+            </div>
+            <div class="version-user-list">
+              ${v.users.length ? v.users.map(user => `<span class="version-user-chip">${user}</span>`).join('') : ''}
+              ${v.devices.length ? v.devices.map(device => `<span class="version-user-chip">${device}</span>`).join('') : ''}
+            </div>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+  panel.classList.add('show');
+  panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  panel.querySelector('.close-version-btn')?.addEventListener('click', () => panel.classList.remove('show'));
+}
+
+function toggleVersionBreakdown(breakdown) {
+  const panel = document.getElementById('versionListPanel');
+  if (!panel) return;
+  if (panel.classList.contains('show')) {
+    panel.classList.remove('show');
+  } else {
+    showVersionBreakdown(breakdown);
+  }
+}
+
+const formatEventDetails = (event) => {
+  const data = safeParseJSON(event.event_data);
+  const item = data?.itemName || data?.item_name || data?.category || data?.product || 'item';
+  const qty = data?.quantity || data?.qty || data?.count;
+  const amount = data?.amount || data?.total || data?.price;
+
+  switch (event.event_type) {
+    case 'item_added_to_stock':
+      return `Added ${qty ?? '1'} × ${item}${data?.category ? ` (${data.category})` : ''}`.trim();
+    case 'sale_recorded':
+      return `Sale recorded${amount ? ` for ${amount}` : ''}${item ? ` (${item})` : ''}`.trim();
+    case 'dashboard_shown':
+      return 'Dashboard displayed';
+    case 'receipt_custom_generated':
+      return 'Custom receipt generated';
+    case 'credit_sales_section_opened':
+      return 'Credit sales section opened';
+    case 'free_mode_activated':
+      return 'Free mode activated';
+    case 'user_mode_activated':
+      return 'User mode activated';
+    case 'setup_complete':
+      return 'Setup completed';
+    case 'receipt_printed':
+      return 'Receipt printed';
+    default:
+      if (data && typeof data === 'object') {
+        return Object.entries(data).map(([k, v]) => `${k.replace(/_/g, ' ')}: ${v}`).join(' · ');
+      }
+      return String(data || 'No details available');
+  }
+};
+
+const getEventLocation = (event) => {
+  const city = event.city?.trim();
+  const country = event.country?.trim();
+  if (city || country) return [city, country].filter(Boolean).join(', ');
+  if (event.latitude && event.longitude) return `${event.latitude}, ${event.longitude}`;
+  return '—';
+};
+
 // ========== DATA FETCHING ==========
 async function fetchData() {
   if (!supabaseClient) return;
@@ -276,6 +420,33 @@ function computeStats(data) {
 
 function renderStats() {
   const stats = computeStats(filteredData);
+  const versionCounts = {};
+  setupData.forEach(s => {
+    const version = s.app_version || 'unknown';
+    versionCounts[version] = (versionCounts[version] || 0) + 1;
+  });
+  function parseVersion(value) {
+    if (!value || value === 'unknown') return [0, 0, 0];
+    const parts = value.split('.').map(p => Number(p));
+    return [parts[0] || 0, parts[1] || 0, parts[2] || 0];
+  }
+
+  function compareVersions(a, b) {
+    const pa = parseVersion(a);
+    const pb = parseVersion(b);
+    for (let i = 0; i < 3; i++) {
+      if (pa[i] !== pb[i]) return pb[i] - pa[i];
+    }
+    return 0;
+  }
+
+  const versionEntries = Object.entries(versionCounts).sort((a, b) => {
+    return compareVersions(a[0], b[0]);
+  });
+  const latestVersion = versionEntries[0]?.[0] || '—';
+  const latestVersionCount = versionEntries[0]?.[1] || 0;
+  const versionAdoptionPercent = setupData.length ? Math.round((latestVersionCount / setupData.length) * 100) : 0;
+  const versionBreakdown = buildVersionBreakdown(setupData);
 
   const statsCards = [
     { label: 'Active Devices', value: stats.uniqueDevices, icon: 'fa-mobile-alt', color: 'blue' },
@@ -287,6 +458,8 @@ function renderStats() {
     { label: 'Credit Sales', value: stats.credit, icon: 'fa-credit-card', color: 'red' },
     { label: 'Daily Active Profiles', value: stats.dailyActiveProfiles, icon: 'fa-signal', color: 'blue' },
     { label: 'Monthly Active Profiles', value: stats.monthlyActiveProfiles, icon: 'fa-calendar-alt', color: 'purple' },
+    { label: 'Latest Version', value: `${latestVersionCount} on ${latestVersion === 'unknown' ? latestVersion : `v${latestVersion}`}`, icon: 'fa-code-branch', color: 'indigo', clickable: true },
+    { label: 'Version Adoption', value: `${versionAdoptionPercent}%`, icon: 'fa-chart-pie', color: 'green' },
     { label: 'Stickiness', value: stats.stickiness, icon: 'fa-thumbtack', color: 'green' },
     { label: 'Unique Profiles', value: stats.uniqueProfiles, icon: 'fa-users', color: 'indigo' },
     { label: 'Items Added', value: stats.stockAdds, icon: 'fa-box', color: 'green' },
@@ -308,7 +481,7 @@ function renderStats() {
   ];
 
   document.getElementById('statsGrid').innerHTML = statsCards.map(stat => `
-    <div class="stat-card">
+    <div class="stat-card ${stat.clickable ? 'clickable' : ''}" ${stat.clickable ? 'data-stat="latest-version" title="Click to view version rollout details"' : ''}>
       <div class="stat-header">
         <div class="stat-icon ${stat.color}">
           <i class="fas ${stat.icon}"></i>
@@ -318,6 +491,11 @@ function renderStats() {
       <div class="stat-number">${stat.value.toLocaleString()}</div>
     </div>
   `).join('');
+
+  const versionStat = document.querySelector('[data-stat="latest-version"]');
+  if (versionStat) {
+    versionStat.addEventListener('click', () => toggleVersionBreakdown(versionBreakdown));
+  }
 }
 
 // ========== CHARTS ==========
@@ -465,6 +643,41 @@ function renderCharts() {
       }
     });
   }
+
+  const versionCounts = {};
+  setupData.forEach(s => {
+    const version = s.app_version || 'unknown';
+    versionCounts[version] = (versionCounts[version] || 0) + 1;
+  });
+  const versionEntries = Object.entries(versionCounts).sort((a, b) => {
+    return compareVersions(a[0], b[0]);
+  }).slice(0, 5);
+
+  destroyChart('version');
+  const versionCtx = document.getElementById('versionChart')?.getContext('2d');
+  if (versionCtx) {
+    charts.version = new Chart(versionCtx, {
+      type: 'bar',
+      data: {
+        labels: versionEntries.map(v => v[0] === 'unknown' ? 'unknown' : `v${v[0]}`),
+        datasets: [{
+          label: 'Installations',
+          data: versionEntries.map(v => v[1]),
+          backgroundColor: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'],
+          borderRadius: 6,
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color: '#94a3b8' }, grid: { display: false } },
+          y: { ticks: { color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,0.05)' } }
+        }
+      }
+    });
+  }
 }
 
 // ========== TABLE ==========
@@ -509,12 +722,18 @@ function renderTable() {
   
   pageData.forEach(e => {
     const row = tbody.insertRow();
+    const deviceId = e.device_id || '—';
+
     row.insertCell(0).textContent = formatDate(e.created_at);
     row.insertCell(1).innerHTML = `<span class="event-badge badge-${e.event_type}">${e.event_type.replace(/_/g, ' ')}</span>`;
     row.insertCell(2).textContent = e.username || '—';
-    row.insertCell(3).textContent = (e.device_id || '—').slice(0, 12) + '…';
-    row.insertCell(4).textContent = `${e.city || ''} ${e.country || ''}`.trim() || '—';
-    row.insertCell(5).textContent = e.event_data ? JSON.stringify(e.event_data).slice(0, 50) : '—';
+    row.insertCell(3).innerHTML = `<span title="${deviceId}">${deviceId.slice(0, 16)}${deviceId.length > 16 ? '…' : ''}</span>`;
+    row.insertCell(4).textContent = getEventLocation(e);
+    row.insertCell(5).innerHTML = `
+      <div style="max-width: 340px; white-space: normal; word-break: break-word; overflow-wrap: anywhere; color: #e2e8f0;">
+        ${formatEventDetails(e)}
+      </div>
+    `;
   });
 
   document.getElementById('tableInfo').textContent = 
@@ -784,132 +1003,135 @@ function renderSetupsTable() {
         return;
     }
     
+    const parsedSetupData = setupData.map(s => {
+        const metadata = safeParseJSON(s.metadata) || {};
+        const latitude = typeof s.latitude === 'string' ? parseFloat(s.latitude) : s.latitude;
+        const longitude = typeof s.longitude === 'string' ? parseFloat(s.longitude) : s.longitude;
+
+        return {
+            ...s,
+            metadata,
+            email_verified: s.email_verified ?? metadata.email_verified ?? false,
+            hasLogo: s.hasLogo ?? metadata.hasLogo ?? false,
+            platform: s.platform || metadata.platform || metadata.platformName || '',
+            language: s.language || metadata.language || '',
+            setup_duration: s.setup_duration || metadata.setupDuration || '',
+            screenResolution: metadata.screenResolution || '',
+            timezone: s.timezone || metadata.timezone || '',
+            latitude,
+            longitude,
+            isOwner: !!s.owner_name,
+            verified: (s.email_verified ?? metadata.email_verified) ? 'Verified' : 'Pending',
+        };
+    });
+
     // Sort by date (newest first)
-    const sortedData = [...setupData].sort((a, b) => {
+    const sortedData = [...parsedSetupData].sort((a, b) => {
         return new Date(b.created_at || b.setup_completed_at) - new Date(a.created_at || a.setup_completed_at);
     });
-    
-    sortedData.forEach((s, index) => {
+
+    sortedData.forEach((s) => {
         const row = tbody.insertRow();
-        
+
         // Date & Time
         const dateCell = row.insertCell(0);
         dateCell.innerHTML = `
-            <div style="display: flex; flex-direction: column;">
+            <div style="display: flex; flex-direction: column; gap: 4px;">
                 <span style="font-weight: 500;">${formatDate(s.created_at || s.setup_completed_at)}</span>
-                <span style="font-size: 0.7rem; color: var(--text-dim);">
-                    ${formatTime(s.created_at || s.setup_completed_at)}
-                </span>
+                <span style="font-size: 0.7rem; color: var(--text-dim);">${formatTime(s.created_at || s.setup_completed_at)}</span>
             </div>
         `;
-        
+
         // Username with badge
         const usernameCell = row.insertCell(1);
         usernameCell.innerHTML = `
-            <div style="display: flex; align-items: center; gap: 6px;">
+            <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
                 <span style="font-weight: 600;">${s.username || '—'}</span>
                 ${s.isOwner ? '<span style="font-size: 0.6rem; background: #f59e0b; color: #000; padding: 1px 8px; border-radius: 10px; font-weight: 700;">OWNER</span>' : ''}
             </div>
         `;
-        
+
         // Email with verification status
         const emailCell = row.insertCell(2);
         emailCell.innerHTML = `
-            <div style="display: flex; flex-direction: column;">
+            <div style="display: flex; flex-direction: column; gap: 2px;">
                 <span>${s.email || '—'}</span>
-                ${s.email_verified ? 
-                    '<span style="font-size: 0.65rem; color: #10b981;"><i class="fas fa-check-circle"></i> Verified</span>' : 
-                    '<span style="font-size: 0.65rem; color: var(--text-dim);"><i class="fas fa-clock"></i> Pending</span>'
-                }
+                <span style="font-size: 0.65rem; color: ${s.email_verified ? '#10b981' : '#94a3b8'};">` +
+                    `<i class="fas ${s.email_verified ? 'fa-check-circle' : 'fa-clock'}"></i> ${s.email_verified ? 'Verified' : 'Pending'}` +
+                `</span>
             </div>
         `;
-        
+
         // Business Name with logo indicator
         const businessCell = row.insertCell(3);
         businessCell.innerHTML = `
-            <div style="display: flex; flex-direction: column;">
+            <div style="display: flex; flex-direction: column; gap: 4px;">
                 <span style="font-weight: 500;">${s.business_name || '—'}</span>
-                ${s.hasLogo ? 
-                    '<span style="font-size: 0.65rem; color: #8b5cf6;"><i class="fas fa-image"></i> Has Logo</span>' : 
-                    ''
-                }
-                ${s.business_description ? 
-                    `<span style="font-size: 0.65rem; color: var(--text-dim);">${truncateText(s.business_description, 30)}</span>` : 
-                    ''
-                }
+                ${s.hasLogo ? '<span style="font-size: 0.65rem; color: #8b5cf6;"><i class="fas fa-image"></i> Has Logo</span>' : ''}
+                ${s.business_description ? `<span style="font-size: 0.65rem; color: var(--text-dim);">${truncateText(s.business_description, 40)}</span>` : ''}
             </div>
         `;
-        
+
         // Location with map link
         const locationCell = row.insertCell(4);
         const locationText = `${s.city || ''}${s.city && s.country ? ', ' : ''}${s.country || ''}`.replace(/^, /, '') || '—';
         locationCell.innerHTML = `
-            <div style="display: flex; flex-direction: column;">
+            <div style="display: flex; flex-direction: column; gap: 4px;">
                 <span>${locationText}</span>
-                ${s.latitude && s.longitude ? 
-                    `<span style="font-size: 0.6rem; color: var(--text-dim);">
+                ${Number.isFinite(s.latitude) && Number.isFinite(s.longitude) ? `
+                    <span style="font-size: 0.65rem; color: var(--text-dim);">
                         <i class="fas fa-map-pin"></i> ${s.latitude.toFixed(4)}, ${s.longitude.toFixed(4)}
-                        <a href="https://www.google.com/maps?q=${s.latitude},${s.longitude}" 
-                           target="_blank" 
-                           style="color: #3b82f6; text-decoration: none; margin-left: 4px;">
+                        <a href="https://www.google.com/maps?q=${s.latitude},${s.longitude}" target="_blank" style="color: #3b82f6; text-decoration: none; margin-left: 4px;">
                             <i class="fas fa-external-link-alt" style="font-size: 0.6rem;"></i>
                         </a>
-                    </span>` : 
-                    ''
-                }
-                ${s.location_source ? 
-                    `<span style="font-size: 0.6rem; color: var(--text-dim);">
-                        <i class="fas fa-info-circle"></i> ${s.location_source}
-                    </span>` : 
-                    ''
-                }
+                    </span>` : ''}
+                ${s.location_source ? `<span style="font-size: 0.6rem; color: var(--text-dim);"><i class="fas fa-info-circle"></i> ${s.location_source}</span>` : ''}
             </div>
         `;
-        
+
         // Language with flag
         const languageCell = row.insertCell(5);
         const langFlags = {
-            'en': '🇺🇸', 'fr': '🇫🇷', 'sw': '🇰🇪', 
-            'hi': '🇮🇳', 'ms': '🇲🇾', 'ar': '🇸🇦', 
-            'es': '🇪🇸', 'zh': '🇨🇳'
+            'en': '🇺🇸',
+            'fr': '🇫🇷',
+            'sw': '🇰🇪',
+            'hi': '🇮🇳',
+            'ms': '🇲🇾',
+            'ar': '🇸🇦',
+            'es': '🇪🇸',
+            'zh': '🇨🇳'
         };
         languageCell.innerHTML = `
-            <span class="event-badge" style="background: rgba(139,92,246,0.2); color: #a78bfa; display: inline-flex; align-items: center; gap: 4px;">
-                ${langFlags[s.language] || '🌐'} ${(s.language || 'en').toUpperCase()}
-            </span>
+            <div style="display: flex; flex-direction: column; gap: 3px;">
+                <span class="event-badge" style="background: rgba(139,92,246,0.2); color: #a78bfa; display: inline-flex; align-items: center; gap: 4px;">
+                    ${langFlags[s.language] || '🌐'} ${(s.language || 'en').toUpperCase()}
+                </span>
+                ${s.screenResolution ? `<span style="font-size: 0.65rem; color: var(--text-dim);">${s.screenResolution}</span>` : ''}
+            </div>
         `;
-        
+
         // Version with app info
         const versionCell = row.insertCell(6);
         versionCell.innerHTML = `
-            <div style="display: flex; flex-direction: column;">
+            <div style="display: flex; flex-direction: column; gap: 4px;">
                 <span style="font-weight: 500; font-size: 0.85rem;">v${s.app_version || '1.0'}</span>
-                ${s.platform ? 
-                    `<span style="font-size: 0.6rem; color: var(--text-dim);">${s.platform}</span>` : 
-                    ''
-                }
+                ${s.platform ? `<span style="font-size: 0.6rem; color: var(--text-dim);">${s.platform}</span>` : ''}
+                ${s.timezone ? `<span style="font-size: 0.6rem; color: var(--text-dim);">${s.timezone}</span>` : ''}
             </div>
         `;
-        
+
         // Status with completion info
         const statusCell = row.insertCell(7);
         const isComplete = s.setup_completed_at || s.setup_completed;
         const statusBadge = isComplete ? 'success' : 'warning';
         const statusText = isComplete ? 'Complete' : 'In Progress';
-        
         statusCell.innerHTML = `
-            <div style="display: flex; flex-direction: column; gap: 2px;">
-                <span class="status-badge status-${statusBadge}" style="font-size: 0.75rem; padding: 2px 10px; border-radius: 12px; display: inline-block; width: fit-content;">
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+                <span class="status-badge status-${statusBadge}" style="font-size: 0.75rem; padding: 2px 10px; border-radius: 12px; display: inline-flex; align-items: center; gap: 6px;">
                     <i class="fas ${isComplete ? 'fa-check-circle' : 'fa-clock'}"></i> ${statusText}
                 </span>
-                ${s.setup_duration ? 
-                    `<span style="font-size: 0.6rem; color: var(--text-dim);">⏱️ ${s.setup_duration}s</span>` : 
-                    ''
-                }
-                ${s.device_id ? 
-                    `<span style="font-size: 0.55rem; color: var(--text-dim); font-family: monospace;" title="Device ID">🖥️ ${truncateText(s.device_id, 12)}</span>` : 
-                    ''
-                }
+                ${s.setup_duration ? `<span style="font-size: 0.6rem; color: var(--text-dim);">⏱️ ${s.setup_duration}s</span>` : ''}
+                ${s.device_id ? `<span style="font-size: 0.65rem; color: var(--text-dim); font-family: monospace;">🖥️ ${truncateText(s.device_id, 12)}</span>` : ''}
             </div>
         `;
     });
