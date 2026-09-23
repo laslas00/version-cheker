@@ -13,6 +13,7 @@ let charts = {};
 let currentPage = 1;
 const PER_PAGE = 50;
 let setupData = [];
+let updateData = [];
 let feedbackData = [];
 let profileData = [];
 let selectedProfileKey = null;
@@ -294,7 +295,29 @@ async function fetchSetupData() {
   }
   
   setupData = data || [];
-  document.getElementById('setupsCount').textContent = setupData.length;
+  const setupsCountEl = document.getElementById('setupsCount');
+  if (setupsCountEl) setupsCountEl.textContent = setupData.length;
+}
+
+async function fetchUserUpdateData() {
+  if (!supabaseClient) return;
+
+  const { data, error } = await supabaseClient
+    .from('userupdate')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.warn('User update records not available yet:', error.message || error);
+    updateData = [];
+    const updateCountEl = document.getElementById('updatesCount');
+    if (updateCountEl) updateCountEl.textContent = '0';
+    return;
+  }
+
+  updateData = data || [];
+  const updateCountEl = document.getElementById('updatesCount');
+  if (updateCountEl) updateCountEl.textContent = updateData.length;
 }
 
 function applyFilters() {
@@ -327,6 +350,10 @@ function applyFilters() {
 
   if (currentTab === 'profiles') {
     renderUserProfilesTable();
+  }
+
+  if (currentTab === 'updates') {
+    renderUpdatesTable();
   }
   
   document.getElementById('lastUpdateTime').innerText = new Date().toLocaleString();
@@ -965,6 +992,62 @@ function renderUserProfilesTable() {
 }
 
 // ========== TAB-SPECIFIC RENDERERS ==========
+async function saveSetupToUserUpdate(setupRow) {
+  if (!supabaseClient || !setupRow) return;
+
+  const metadata = safeParseJSON(setupRow.metadata) || {};
+  const payload = {
+    username: setupRow.username || null,
+    email: setupRow.email || null,
+    owner_name: setupRow.owner_name || null,
+    business_name: setupRow.business_name || null,
+    business_address: setupRow.business_address || null,
+    business_phone: setupRow.business_phone || null,
+    business_website: setupRow.business_website || null,
+    business_description: setupRow.business_description || null,
+    city: setupRow.city || null,
+    country: setupRow.country || null,
+    region: setupRow.region || null,
+    latitude: setupRow.latitude ?? metadata.latitude ?? null,
+    longitude: setupRow.longitude ?? metadata.longitude ?? null,
+    location_source: setupRow.location_source || metadata.location_source || 'ip',
+    language: setupRow.language || metadata.language || 'en',
+    currency: setupRow.currency || 'XAF',
+    warranty_duration: setupRow.warranty_duration ?? metadata.warranty_duration ?? 1,
+    warranty_unit: setupRow.warranty_unit || metadata.warranty_unit || 'weeks',
+    device_id: setupRow.device_id || null,
+    ip_address: setupRow.ip_address || null,
+    user_agent: setupRow.user_agent || null,
+    setup_completed_at: setupRow.setup_completed_at || setupRow.created_at || new Date().toISOString(),
+    app_version: setupRow.app_version || metadata.latestVersion || 'unknown',
+    metadata: JSON.stringify({ ...metadata, source: 'setup_row', inserted_from: 'dashboard' }),
+    business_id: setupRow.business_id || setupRow.id || null,
+    user_id: setupRow.user_id || null,
+    updated_at: new Date().toISOString(),
+    created_at: setupRow.created_at || new Date().toISOString()
+  };
+
+  try {
+    showLoading('Saving setup row to user updates...');
+    const { error } = await supabaseClient
+      .from('userupdate')
+      .insert([payload]);
+
+    if (error) throw error;
+
+    showToast('Selected setup row inserted into userupdate table', 'success');
+    await fetchUserUpdateData();
+    if (currentTab === 'updates') {
+      renderUpdatesTable();
+    }
+  } catch (error) {
+    console.error('Error inserting row into userupdate:', error);
+    showToast('Unable to insert into userupdate table', 'error');
+  } finally {
+    hideLoading();
+  }
+}
+
 function renderSetupsTable() {
     const tbody = document.getElementById('eventsTableBody');
     tbody.innerHTML = '';
@@ -1153,6 +1236,76 @@ function renderSetupsTable() {
     document.getElementById('tableTitle').textContent = '👥 User Setups Dashboard';
     document.getElementById('pageButtons').innerHTML = '';
     document.getElementById('pageInfo').textContent = '';
+}
+
+function renderUpdatesTable() {
+  const tbody = document.getElementById('eventsTableBody');
+  tbody.innerHTML = '';
+
+  document.getElementById('eventsTableHead').innerHTML = `
+    <tr>
+      <th>Date</th>
+      <th>Username</th>
+      <th>Email</th>
+      <th>Business Name</th>
+      <th>Location</th>
+      <th>Language</th>
+      <th>Version</th>
+      <th>Status</th>
+    </tr>
+  `;
+
+  if (!updateData || updateData.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="8">
+          <div class="empty-state">
+            <i class="fas fa-sync-alt"></i>
+            <p>No update records yet</p>
+            <p style="font-size: 0.85rem; color: var(--text-dim);">
+              Click any setup row to insert it into the userupdate table.
+            </p>
+          </div>
+        </td>
+      </tr>
+    `;
+    document.getElementById('tableInfo').textContent = 'No update records found';
+    document.getElementById('pageButtons').innerHTML = '';
+    document.getElementById('pageInfo').textContent = '';
+    return;
+  }
+
+  updateData.forEach((record) => {
+    const row = tbody.insertRow();
+
+    const metadata = safeParseJSON(record.metadata) || {};
+    const locationText = `${record.city || ''}${record.city && record.country ? ', ' : ''}${record.country || ''}`.replace(/^, /, '') || '—';
+    const dateValue = record.created_at || record.setup_completed_at || record.updated_at;
+
+    row.insertCell(0).innerHTML = `
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <span style="font-weight: 500;">${formatDate(dateValue)}</span>
+        <span style="font-size: 0.7rem; color: var(--text-dim);">${formatTime(dateValue)}</span>
+      </div>
+    `;
+    row.insertCell(1).innerHTML = `<strong>${record.username || '—'}</strong>`;
+    row.insertCell(2).textContent = record.email || '—';
+    row.insertCell(3).textContent = record.business_name || '—';
+    row.insertCell(4).innerHTML = `
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <span>${locationText}</span>
+        ${Number.isFinite(Number(record.latitude)) && Number.isFinite(Number(record.longitude)) ? `<span style="font-size: 0.65rem; color: var(--text-dim);"><i class="fas fa-map-pin"></i> ${Number(record.latitude).toFixed(4)}, ${Number(record.longitude).toFixed(4)}</span>` : ''}
+      </div>
+    `;
+    row.insertCell(5).innerHTML = `<span class="event-badge" style="background: rgba(139,92,246,0.2); color: #a78bfa; display: inline-flex; align-items: center; gap: 4px;">${(record.language || metadata.language || 'EN').toUpperCase()}</span>`;
+    row.insertCell(6).textContent = `v${record.app_version || metadata.latestVersion || '1.0'}`;
+    row.insertCell(7).innerHTML = `<span class="status-badge" style="font-size: 0.75rem; padding: 2px 10px; border-radius: 12px; display: inline-flex; align-items: center; gap: 6px; background: rgba(16,185,129,0.15); color: #34d399;"> <i class="fas fa-check-circle"></i> Saved</span>`;
+  });
+
+  document.getElementById('tableInfo').textContent = `${updateData.length} user update records`;
+  document.getElementById('tableTitle').textContent = '🔄 User Updates';
+  document.getElementById('pageButtons').innerHTML = '';
+  document.getElementById('pageInfo').textContent = '';
 }
 
 // Helper function to format time
@@ -1540,6 +1693,18 @@ async function switchTab(tab, clickedElement) {
       renderSetupsTable();
        hideFeedbackDashboard();
       break;
+
+    case 'updates':
+      pageHeading.innerHTML = '<i class="fas fa-sync-alt"></i> User Updates';
+      filterBar.style.display = 'none';
+      statsGrid.style.display = 'none';
+      chartsGrid.style.display = 'none';
+      tableContainer.style.display = 'block';
+      pagination.style.display = 'none';
+      await fetchUserUpdateData();
+      renderUpdatesTable();
+      hideFeedbackDashboard();
+      break;
       
     case 'countries':
       pageHeading.innerHTML = '<i class="fas fa-globe-americas"></i> Countries';
@@ -1701,6 +1866,7 @@ async function refreshDashboard() {
   showLoading('Refreshing dashboard data...');
   await fetchData();
   await fetchSetupData();
+  await fetchUserUpdateData();
   await fetchFeedbackData();
   hideLoading();
 }
