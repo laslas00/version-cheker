@@ -1,12 +1,13 @@
 {
   "name": "stocksalesapp",
-  "version": "5.4.8",
-  "description": "Stock and Sales Management System with Electron + Node.js/Express backend",
+  "version": "5.4.9",
+  "productName": "stocksalesapp",
+  "description": "An enterprise-grade, local desktop application for lightning-fast stock tracking, real-time sales management, and seamless retail operations. Empower your business with advanced analytics, intuitive dashboards, and offline capabilities, all in one powerful solution.",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "server": "node server.js",
-    "build:tailwind": "tailwindcss -i ./src/input.css -o ./styles/output.css",
+    "build:tailwind": "tailwindcss --input ./src/input.css --output ./styles/output.css",
     "test": "echo \"Error: no test specified\" && exit 1",
     "build:appx": "electron-builder --win appx"
   },
@@ -19,7 +20,6 @@
     },
     "files": [
       "**/*",
-      "!src/**/*",
       "!output/**/*",
       ".env",
       "!tailwind.config.js"
@@ -33,23 +33,26 @@
           ]
         }
       ],
-      "icon": "stockapp.ico"
+      "icon": "StockApp.ico"
     },
     "appx": {
       "identityName": "Ihubsapp.stocksalesapp",
       "publisher": "CN=6DD6C43D-7610-4460-9766-F0629B188FAD",
       "publisherDisplayName": "I hubs tech",
-      "displayName": "Stock App",
+      "displayName": "stocksalesapp",
       "backgroundColor": "#ffffff",
       "addAutoLaunchExtension": true,
       "capabilities": [
         "internetClient",
+        "internetClientServer",
         "privateNetworkClientServer",
-        "runFullTrust"
+        "runFullTrust",
+        "webcam",
+        "microphone"
       ]
     }
   },
- "dependencies": {
+  "dependencies": {
     "@supabase/supabase-js": "^2.104.0",
     "adm-zip": "^0.5.16",
     "archiver": "^7.0.1",
@@ -72,10 +75,12 @@
     "multicast-dns": "^7.2.5",
     "node-cron": "^4.2.1",
     "node-forge": "^1.3.3",
+    "node-hid": "^3.3.0",
     "node-machine-id": "^1.1.12",
     "node-notifier": "^10.0.1",
     "nodemailer": "^7.0.12",
     "pdfkit": "^0.17.1",
+    "usb": "^2.14.0",
     "ws": "^8.18.2",
     "ws-discovery": "^0.0.2",
     "wss": "^0.0.2",
@@ -90,8 +95,22 @@
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.18"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "pos",
+    "point-of-sale",
+    "inventory",
+    "stock-management",
+    "sales",
+    "retail",
+    "business",
+    "billing",
+    "supermarket",
+    "shop-management"
+  ],
+  "overrides": {
+    "iobuffer": "^6.0.1"
+  },
+  "author": "I hubs tech",
   "license": "ISC",
   "type": "commonjs"
 }
