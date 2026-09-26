@@ -168,123 +168,115 @@ const getEventLocation = (event) => {
 
 // ========== DATA FETCHING ==========
 async function fetchData() {
-  if (!supabaseClient) return;
-  
-  showLoading('Fetching events data...');
-  
-  let allData = [];
-  let page = 0;
-  const pageSize = 1000;
-  let hasMore = true;
-  
-  try {
-    const { count, error: countError } = await supabaseClient
-      .from('app_events')
-      .select('*', { count: 'exact', head: true });
-    
-    if (countError) throw countError;
-    
-    const totalRecords = count;
-    console.log(`Total records to fetch: ${totalRecords}`);
-    
-    while (hasMore) {
-      const start = page * pageSize;
-      const end = start + pageSize - 1;
-      
-      let query = supabaseClient
-        .from('app_events')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .range(start, end);
-      
-      if (startDate && endDate) {
-        query = query.gte('created_at', startDate).lte('created_at', endDate + 'T23:59:59');
-      }
-      
-      const { data, error } = await query;
-      
-      if (error) throw error;
-      
-      if (data && data.length > 0) {
-        allData = [...allData, ...data];
-        page++;
-        console.log(`Fetched ${allData.length} of ${totalRecords} records`);
-      }
-      
-      if (!data || data.length < pageSize) {
-        hasMore = false;
-      }
-      
-      await new Promise(resolve => setTimeout(resolve, 100));
+    if (!supabaseClient) return;
+
+    showLoading('Fetching events data...');
+
+    try {
+        // Build ISO date bounds from startDate / endDate
+        const startTs = startDate ? `${startDate}T00:00:00Z` : null;
+        const endTs   = endDate   ? `${endDate}T23:59:59Z`   : null;
+
+        // Fetch in pages of 1000 via the RPC
+        let allData = [];
+        let offset = 0;
+        const pageSize = 1000;
+        let hasMore = true;
+        let total = 0;
+
+        while (hasMore) {
+            const { data, error } = await supabaseClient.rpc(
+                'get_app_events_for_dashboard',
+                {
+                    p_start_date: startTs,
+                    p_end_date:   endTs,
+                    p_limit:      pageSize,
+                    p_offset:     offset
+                }
+            );
+
+            if (error) throw error;
+
+            const pageRows = data?.rows || [];
+            total = data?.total || 0;
+
+            allData = allData.concat(pageRows);
+            offset += pageSize;
+
+            console.log(`Fetched ${allData.length} of ${total} records`);
+
+            if (pageRows.length < pageSize) hasMore = false;
+
+            // small delay so we don't slam the API
+            await new Promise(r => setTimeout(r, 100));
+        }
+
+        rawData = allData;
+        console.log(`✅ Successfully fetched ${rawData.length} records`);
+        applyFilters();
+    } catch (error) {
+        console.error('Error fetching events:', error);
+        showToast('Error loading data: ' + error.message, 'error');
+    } finally {
+        hideLoading();
     }
-    
-    rawData = allData;
-    console.log(`✅ Successfully fetched ${rawData.length} records`);
-    applyFilters();
-    
-  } catch (error) {
-    console.error('Error fetching events:', error);
-    showToast('Error loading data: ' + error.message, 'error');
-  } finally {
-    hideLoading();
-  }
 }
 
 async function fetchFeedbackData() {
-  if (!supabaseClient) return;
-  
-  const { data, error } = await supabaseClient
-    .from('user_feedback')
-    .select('*')
-    .order('created_at', { ascending: false });
-  
-  if (error) {
-    console.error('Error fetching feedback:', error);
-    return;
-  }
-  
-  feedbackData = data || [];
-  const feedbackCountEl = document.getElementById('feedbackCount');
-  if (feedbackCountEl) feedbackCountEl.textContent = feedbackData.length;
+    if (!supabaseClient) return;
+
+    const { data, error } = await supabaseClient.rpc(
+        'get_user_feedback_for_dashboard',
+        { p_limit: 5000, p_offset: 0 }
+    );
+
+    if (error) {
+        console.error('Error fetching feedback:', error);
+        return;
+    }
+
+    feedbackData = data || [];
+    const feedbackCountEl = document.getElementById('feedbackCount');
+    if (feedbackCountEl) feedbackCountEl.textContent = feedbackData.length;
 }
 
 async function fetchSetupData() {
-  if (!supabaseClient) return;
-  
-  const { data, error } = await supabaseClient
-    .from('user_setups')
-    .select('*')
-    .order('created_at', { ascending: false });
-  
-  if (error) {
-    console.error('Error fetching setup data:', error);
-    return;
-  }
-  
-  setupData = data || [];
-  const setupsCountEl = document.getElementById('setupsCount');
-  if (setupsCountEl) setupsCountEl.textContent = setupData.length;
+    if (!supabaseClient) return;
+
+    const { data, error } = await supabaseClient.rpc(
+        'get_user_setups_for_dashboard',
+        { p_limit: 5000, p_offset: 0 }
+    );
+
+    if (error) {
+        console.error('Error fetching setup data:', error);
+        return;
+    }
+
+    setupData = data || [];
+    const setupsCountEl = document.getElementById('setupsCount');
+    if (setupsCountEl) setupsCountEl.textContent = setupData.length;
 }
 
 async function fetchUserUpdateData() {
-  if (!supabaseClient) return;
+    if (!supabaseClient) return;
 
-  const { data, error } = await supabaseClient
-    .from('userupdate')
-    .select('*')
-    .order('created_at', { ascending: false });
+    const { data, error } = await supabaseClient.rpc(
+        'get_user_updates_for_dashboard',
+        { p_limit: 5000, p_offset: 0 }
+    );
 
-  if (error) {
-    console.warn('User update records not available yet:', error.message || error);
-    updateData = [];
-    const updateCountEl = document.getElementById('updatesCount');
-    if (updateCountEl) updateCountEl.textContent = '0';
-    return;
-  }
+    if (error) {
+        console.warn('User update records not available yet:', error.message || error);
+        updateData = [];
+        const el = document.getElementById('updatesCount');
+        if (el) el.textContent = '0';
+        return;
+    }
 
-  updateData = data || [];
-  const updateCountEl = document.getElementById('updatesCount');
-  if (updateCountEl) updateCountEl.textContent = updateData.length;
+    updateData = data || [];
+    const el = document.getElementById('updatesCount');
+    if (el) el.textContent = updateData.length;
 }
 
 function applyFilters() {
