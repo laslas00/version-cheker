@@ -47,6 +47,30 @@ const formatDate = (iso) => {
   return luxon.DateTime.fromISO(iso).toFormat('yyyy-MM-dd HH:mm:ss');
 };
 
+const formatRelativeTime = (dateString) => {
+  if (!dateString) return '—';
+
+  const timestamp = new Date(dateString).getTime();
+  if (!Number.isFinite(timestamp)) return '—';
+
+  const difference = timestamp - Date.now();
+  const age = Math.abs(difference);
+  if (age < 60 * 1000) return difference > 0 ? 'in less than a minute' : 'just now';
+
+  const units = [
+    ['year', 365 * 24 * 60 * 60 * 1000],
+    ['month', 30 * 24 * 60 * 60 * 1000],
+    ['week', 7 * 24 * 60 * 60 * 1000],
+    ['day', 24 * 60 * 60 * 1000],
+    ['hour', 60 * 60 * 1000],
+    ['minute', 60 * 1000],
+    ['second', 1000],
+  ];
+  const [unit, duration] = units.find(([, duration]) => age >= duration) || units[units.length - 1];
+  return new Intl.RelativeTimeFormat('en', { numeric: 'always' })
+    .format(Math.round(difference / duration), unit);
+};
+
 const formatShortDate = (iso) => {
   if (!iso) return '—';
   return luxon.DateTime.fromISO(iso).toFormat('yyyy-MM-dd');
@@ -1196,8 +1220,8 @@ function renderSetupsTable() {
     const dateCell = row.insertCell(0);
     dateCell.innerHTML = `
       <div style="display: flex; flex-direction: column; gap: 4px;">
-        <span style="font-weight: 500;">${formatDate(s.created_at || s.setup_completed_at)}</span>
-        <span style="font-size: 0.7rem; color: var(--text-dim);">${formatTime(s.created_at || s.setup_completed_at)}</span>
+        <span style="font-weight: 500;">${formatRelativeTime(s.created_at || s.setup_completed_at)}</span>
+        <span style="font-size: 0.7rem; color: var(--text-dim);">${formatDate(s.created_at || s.setup_completed_at)}</span>
       </div>
     `;
 
