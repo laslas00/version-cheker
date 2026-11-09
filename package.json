@@ -1,6 +1,6 @@
 {
   "name": "stocksalesapp",
-  "version": "5.4.9",
+  "version": "2.4.9",
   "productName": "stocksalesapp",
   "description": "An enterprise-grade, local desktop application for lightning-fast stock tracking, real-time sales management, and seamless retail operations. Empower your business with advanced analytics, intuitive dashboards, and offline capabilities, all in one powerful solution.",
   "main": "main.js",
